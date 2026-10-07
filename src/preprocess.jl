@@ -991,6 +991,7 @@ end
 # included first because report_figures.jl evaluates PALETTE at load time.
 # =============================================================================
 include(joinpath(@__DIR__, "ui", "tokens.jl"))
+include(joinpath(@__DIR__, "ui", "theme_makie.jl"))
 include(joinpath(@__DIR__, "report_figures.jl"))
 include(joinpath(@__DIR__, "report_artifacts.jl"))
 
