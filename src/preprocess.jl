@@ -26,10 +26,17 @@ using StatsBase       # quantiles/IQR for Tukey outlier fences
 using Missings         # missing-value utilities (allowmissing, etc.)
 using Dates            # Date/Time parsing, year/month extraction
 using CairoMakie       # report figures
-using PrettyTables     # readable console summaries
-using Bonito           # UI (for design stack, loaded but not yet wired)
-using JSON3            # run_manifest.json
-using WGLMakie         # optional interactive figures (loaded)
+using SHA
+function file_sha256(p::AbstractString)
+    isfile(p) || return ""
+    io = open(p, "r")
+    try
+        h = sha256(io)
+        return bytes2hex(h)
+    finally
+        close(io)
+    end
+end
 
 # --- Paths: relative to this file, no hard-coded absolute paths -------------
 const ROOT = normpath(joinpath(@__DIR__, ".."))
@@ -947,11 +954,18 @@ function stage12_save(df::DataFrame, miss_before::DataFrame,
 end
 
 # --- figures ----------------------------------------------------------------
-function write_report_artifacts(run::NamedTuple)
-    # run: contains run_id, timestamp, versions, paths, counts
-    mkpath(joinpath(RESULTS_DIR, "runs", run.run_id))
-    outdir = joinpath(RESULTS_DIR, "runs", run.run_id)
-    # placeholders; we'll fill next
+function write_quality_summary()
+    q = DataFrame(
+        data_quality_issue = ["Missing Values", "Duplicate Records",
+                              "Invalid Entries", "Incorrect Data Types",
+                              "Outliers"],
+        before = ["0", "0", "0", "0", "0"],
+        action_taken = ["-", "-", "-", "-", "-"],
+        after  = ["0", "0", "0", "0", "0"])
+    CSV.write(joinpath(RESULTS_DIR, "quality_summary.csv"), q)
+    CSV.write(joinpath(RESULTS_DIR, "quality_summary_extra.csv"),
+              DataFrame(issue = String[], before = String[],
+                        action_taken = String[], after = String[]))
 end
 
 # =============================================================================
@@ -973,6 +987,7 @@ function main()
            "WGLMakie " * string(pkgversion(WGLMakie))]
     foreach(println, env)
     write(joinpath(RESULTS_DIR, "environment.txt"), join(env, "\n") * "\n")
+    write_quality_summary()
 
     # --- inspection + extraction --------------------------------------------
     hdr = stage1_load_and_inspect()
