@@ -1,0 +1,6 @@
+metric,before,action_taken,after
+Missing Values,7499,Placeholders standardized to missing; zero-measurement records removed; station-year median imputation (flagged),4519
+Duplicate Records,31,"Normalized-key deduplication (station+date+time), keep first",0
+Invalid Entries,231,Censored <x/>x parsed to threshold + flags; malformed date/time repaired; range checks passed,0
+Incorrect Data Types,10,Date/Time/Float64 parsing of all typed columns,0
+Outliers (IQR),357,"Flagged in outlier_params, KEPT (extremes can be real events)",357

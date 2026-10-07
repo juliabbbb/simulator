@@ -1,0 +1,6 @@
+Julia 1.13.1
+XLSX 0.12.4
+DataFrames 1.8.2
+CSV 1.1.0
+CairoMakie 0.15.15
+PrettyTables 3.5.0
