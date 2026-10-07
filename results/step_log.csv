@@ -8,14 +8,14 @@ stage,metric,before,after,note
 1_load,stray_cells_outside_schema,0,30,"orphan transposed fragment, Marilao cols S-W rows 435-440; columns never extracted"
 2_missing,missing_cells,0,7473,"true 'missing' cells across all columns, before cleaning"
 2_missing,placeholder_cells,0,26,"'-', '_', 'NO SAMPLING', blank strings, before cleaning"
-3_duplicates,exact_full_row_duplicates,0,30,""
-3_duplicates,key_duplicates,0,31,""
-4_invalid,string_cells_in_typed_cols,0,231,""
-4_invalid,censored_values,0,214,""
-4_invalid,pH_out_of_range,0,0,""
-4_invalid,negative_concentrations,0,0,""
-4_invalid,coordinates_out_of_domain,0,0,""
-4_invalid,columns_with_incorrect_types,0,10,""
+3_duplicates,exact_full_row_duplicates,0,30,
+3_duplicates,key_duplicates,0,31,
+4_invalid,string_cells_in_typed_cols,0,231,
+4_invalid,censored_values,0,214,
+4_invalid,pH_out_of_range,0,0,
+4_invalid,negative_concentrations,0,0,
+4_invalid,coordinates_out_of_domain,0,0,
+4_invalid,columns_with_incorrect_types,0,10,
 5_remove,duplicate_records_removed,1147,1116,"30 exact, 1 same-date/time"
 5_remove,records_zero_measurements,1116,941,"station+coordinates only, nothing observed"
 6_types,censored_values_parsed,0,214,Decision A: threshold value kept + below_dl/above_range flag

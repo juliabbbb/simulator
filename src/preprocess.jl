@@ -27,6 +27,9 @@ using Missings         # missing-value utilities (allowmissing, etc.)
 using Dates            # Date/Time parsing, year/month extraction
 using CairoMakie       # report figures
 using PrettyTables     # readable console summaries
+using Bonito           # UI (for design stack, loaded but not yet wired)
+using JSON3            # run_manifest.json
+using WGLMakie         # optional interactive figures (loaded)
 
 # --- Paths: relative to this file, no hard-coded absolute paths -------------
 const ROOT = normpath(joinpath(@__DIR__, ".."))
@@ -944,70 +947,11 @@ function stage12_save(df::DataFrame, miss_before::DataFrame,
 end
 
 # --- figures ----------------------------------------------------------------
-function make_figures(df::DataFrame, miss_before::DataFrame,
-                      before::NamedTuple)
-    # Fig 1: missing values before vs after, per column
-    # miss_before is keyed by raw Excel headers; df already uses snake_case
-    raw_cols = ["Date", "Time", PARAM_NAMES...]
-    cols = ["date", "time", PARAM_KEY...]
-    shortlbl = ["date", "time", "DO", "pH", "temp", "BOD", "TSS", "color",
-                "fecal", "total", "ammon", "nitr", "phos", "chlor"]
-    bvals = [let r = findall(isequal(c), miss_before.column)
-                 isempty(r) ? 0 : miss_before.total_missing[r[1]]
-             end for c in raw_cols]
-    avals = [count(ismissing, df[!, c]) for c in cols]
-    fig = Figure(size = (1250, 500))
-    ax = Axis(fig[1, 1], xticks = (1:length(cols), shortlbl),
-              xticklabelrotation = pi / 2,
-              ylabel = "missing cells", title = "Missing values before vs after")
-    xs = 1:length(cols)
-    barplot!(ax, collect(xs) .- 0.18, bvals, width = 0.32, label = "Before")
-    barplot!(ax, collect(xs) .+ 0.18, avals, width = 0.32, label = "After")
-    axislegend(ax)
-    save(joinpath(FIG_DIR, "fig_missing_before_after.png"), fig)
-
-    # Fig 2: record counts through the pipeline
-    stages_lbl = ["Rows scanned\n(in sheets)", "Records\nextracted",
-                  "After zero-meas.\nremoval", "After dedupe\n(final)"]
-    vals = before.flow
-    fig2 = Figure(size = (950, 480))
-    ax2 = Axis(fig2[1, 1], xticks = (1:length(stages_lbl), stages_lbl),
-               xticklabelrotation = pi / 2, ylabel = "row count",
-               title = "Record counts through the pipeline")
-    barplot!(ax2, 1:length(vals), vals,
-             color = [:steelblue, :steelblue, :steelblue, :seagreen])
-    for (i, v) in enumerate(vals)
-        text!(ax2, string(v), position = (i, v), align = (:center, :bottom),
-              fontsize = 12)
-    end
-    save(joinpath(FIG_DIR, "fig_record_counts.png"), fig2)
-
-    # Fig 3: boxplots of key parameters (outliers visible)
-    boxparams = ["dissolved_oxygen_mg_l", "ph", "bod_mg_l", "tss_mg_l",
-                 "ammonia_mg_l", "nitrates_mg_l"]
-    fig3 = Figure(size = (1150, 720))
-    for (k, p) in enumerate(boxparams)
-        axk = Axis(fig3[div(k - 1, 3) + 1, mod(k - 1, 3) + 1],
-                   title = p, xticks = ([1], [""]))
-        v = Float64[x for x in df[!, p] if x isa Float64]
-        boxplot!(axk, ones(length(v)), v, width = 0.55,
-                 mediancolor = :seagreen)
-    end
-    save(joinpath(FIG_DIR, "fig_outlier_boxplots.png"), fig3)
-
-    # Fig 4: key distributions before vs after
-    fig4 = Figure(size = (1100, 450))
-    for (k, (p, lbl)) in enumerate([("dissolved_oxygen_mg_l", "Dissolved Oxygen"),
-                                    ("ph", "pH")])
-        axk = Axis(fig4[1, k], title = lbl * " — before vs after",
-                   xlabel = lbl, ylabel = "count")
-        b = before.dists[p]
-        a = Float64[x for x in df[!, p] if x isa Float64]
-        hist!(axk, b, bins = 30, color = (:gray, 0.45), label = "Before")
-        hist!(axk, a, bins = 30, color = (:steelblue, 0.45), label = "After")
-        axislegend(axk)
-    end
-    save(joinpath(FIG_DIR, "fig_distributions_before_after.png"), fig4)
+function write_report_artifacts(run::NamedTuple)
+    # run: contains run_id, timestamp, versions, paths, counts
+    mkpath(joinpath(RESULTS_DIR, "runs", run.run_id))
+    outdir = joinpath(RESULTS_DIR, "runs", run.run_id)
+    # placeholders; we'll fill next
 end
 
 # =============================================================================
@@ -1023,7 +967,10 @@ function main()
            "DataFrames " * string(pkgversion(DataFrames)),
            "CSV " * string(pkgversion(CSV)),
            "CairoMakie " * string(pkgversion(CairoMakie)),
-           "PrettyTables " * string(pkgversion(PrettyTables))]
+           "PrettyTables " * string(pkgversion(PrettyTables)),
+           "Bonito " * string(pkgversion(Bonito)),
+           "JSON3 " * string(pkgversion(JSON3)),
+           "WGLMakie " * string(pkgversion(WGLMakie))]
     foreach(println, env)
     write(joinpath(RESULTS_DIR, "environment.txt"), join(env, "\n") * "\n")
 
