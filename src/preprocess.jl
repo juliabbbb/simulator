@@ -15,7 +15,10 @@
 #          results/before_after.csv    (summary table for the report)
 #          results/duplicates.csv, results/missing_before.csv,
 #          results/outliers.csv        (detail tables)
-#          figures/*.png               (report charts)
+#          figures/fig01..fig16        (report charts, SVG + PNG)
+#          results/*.csv + run_manifest.json + results/runs/<run_id>/ snapshot
+#                                     (Report Evidence layer T1..T21, see
+#                                      src/report_artifacts.jl)
 # =============================================================================
 
 using XLSX             # read the 3-tab .xlsx raw dataset
@@ -31,6 +34,7 @@ using SHA
 using Bonito           # UI (for design stack, loaded but not yet wired)
 using JSON3            # run_manifest.json
 using WGLMakie         # optional interactive figures (loaded)
+using Colors           # hex <-> RGBA for report charts and the UI palette
 function file_sha256(p::AbstractString)
     isfile(p) || return ""
     io = open(p, "r")
@@ -71,6 +75,29 @@ const PARAM_KEY = ["dissolved_oxygen_mg_l", "ph", "temperature_c", "bod_mg_l",
                    "tss_mg_l", "color_tcu", "fecal_coliform_mpn",
                    "total_coliform_mpn", "ammonia_mg_l", "nitrates_mg_l",
                    "phosphates_mg_l", "chlorides_mg_l"]
+
+# Stage 10 rename map, hoisted to top level so report artifacts/figures can
+# refer to it (e.g. T10 mapping table, FINAL_TO_RAW in report_figures.jl).
+const RENAME_MAP = Dict(
+    "period" => "period_label",
+    "Station No." => "station_no",
+    "Station" => "station",
+    "Latitude, North (degree)" => "latitude",
+    "Longitude, East (degree)" => "longitude",
+    "Date" => "date",
+    "Time" => "time",
+    PARAM_NAMES[1] => PARAM_KEY[1],
+    PARAM_NAMES[2] => PARAM_KEY[2],
+    PARAM_NAMES[3] => PARAM_KEY[3],
+    PARAM_NAMES[4] => PARAM_KEY[4],
+    PARAM_NAMES[5] => PARAM_KEY[5],
+    PARAM_NAMES[6] => PARAM_KEY[6],
+    PARAM_NAMES[7] => PARAM_KEY[7],
+    PARAM_NAMES[8] => PARAM_KEY[8],
+    PARAM_NAMES[9] => PARAM_KEY[9],
+    PARAM_NAMES[10] => PARAM_KEY[10],
+    PARAM_NAMES[11] => PARAM_KEY[11],
+    PARAM_NAMES[12] => PARAM_KEY[12])
 
 # Global accumulators for logs (each is flushed to CSV at the end)
 const STEPS = NamedTuple{(:stage, :metric, :before, :after, :note),
@@ -178,6 +205,7 @@ function extract_records()
     n_skipped_content = 0
     n_skipped_blank = 0
     n_stray_cells = 0
+    records_per_sheet = Dict{String, Int}()
 
     for name in STATION_SHEETS
         d = XLSX.readdata(RAW_PATH, name, string(xf[name].dimension))
@@ -188,6 +216,7 @@ function extract_records()
             v1 = row[1]
             if v1 isa Integer
                 n_records += 1
+                records_per_sheet[name] = get(records_per_sheet, name, 0) + 1
                 vals = ntuple(i -> row[i], N_RAW)
                 push!(recs, (period = period, vals = vals, water_body = name))
             elseif v1 isa AbstractString && startswith(v1, "CY ")
@@ -214,7 +243,7 @@ function extract_records()
 
     @assert nrow(df) == n_records "record count mismatch"
     return df, (; n_records, n_period_labels, n_skipped_content,
-                n_skipped_blank, n_stray_cells)
+                n_skipped_blank, n_stray_cells, records_per_sheet)
 end
 
 close_xlsx(xf) = try
@@ -386,6 +415,7 @@ end
 function stage5_remove!(df::DataFrame)
     banner("STAGE 5 — REMOVE UNNECESSARY RECORDS")
     n0 = nrow(df)
+    removed_dupe_per = Dict(s => 0 for s in STATION_SHEETS)
 
     # --- 5a. duplicate records (on the full table, before anything else) ----
     keys = dup_keys(df)
@@ -401,9 +431,11 @@ function stage5_remove!(df::DataFrame)
             if same_row(df, i, j)
                 remove[i] = true
                 n_exact_rm += 1
+                removed_dupe_per[string(df.water_body[i])] += 1
             elseif !ismissing(df.Date[i]) || !ismissing(df.Date[j])
                 remove[i] = true
                 n_dated_rm += 1
+                removed_dupe_per[string(df.water_body[i])] += 1
             else
                 n_dateless_conflict += 1   # kept: cannot verify which is right
             end
@@ -422,6 +454,10 @@ function stage5_remove!(df::DataFrame)
     empty_mask = [all(p -> ismissing(df[i, p]) || is_placeholder(df[i, p]),
                       PARAM_NAMES) for i in 1:nrow(df)]
     n_empty = count(empty_mask)
+    removed_empty_per = Dict(s => 0 for s in STATION_SHEETS)
+    for i in findall(empty_mask)
+        removed_empty_per[string(df.water_body[i])] += 1
+    end
     delete!(df, findall(empty_mask))
     println("Records with zero measurements: ", n_empty)
 
@@ -438,7 +474,9 @@ function stage5_remove!(df::DataFrame)
                  "Row removal", "stage5_remove!",
                  "A record with zero observed parameters carries no information; station metadata repeats on every other row",
                  n_empty)
-    return n_empty, n_exact_rm + n_dated_rm, n_dateless_conflict
+    return (; n_empty, n_dupe = n_exact_rm + n_dated_rm,
+            n_exact_rm, n_dated_rm, n_conflict = n_dateless_conflict,
+            removed_empty_per, removed_dupe_per)
 end
 
 # =============================================================================
@@ -793,26 +831,7 @@ end
 # =============================================================================
 function stage10_transform!(df::DataFrame)
     banner("STAGE 10 — TRANSFORM VARIABLES")
-    mapping = Dict(
-        "period" => "period_label",
-        "Station No." => "station_no",
-        "Station" => "station",
-        "Latitude, North (degree)" => "latitude",
-        "Longitude, East (degree)" => "longitude",
-        "Date" => "date",
-        "Time" => "time",
-        "Dissolved Oxygen, mg/L" => "dissolved_oxygen_mg_l",
-        "PH" => "ph",
-        "Temperature °C*" => "temperature_c",
-        "Biochemical Oxygen Demand, mg/L" => "bod_mg_l",
-        "Total Suspended Solids, mg/L" => "tss_mg_l",
-        "Color TCU" => "color_tcu",
-        "Fecal Coliform, MPN/100mL" => "fecal_coliform_mpn",
-        "Total Coliform, MPN/100mL" => "total_coliform_mpn",
-        "Ammonia, mg/L" => "ammonia_mg_l",
-        "Nitrates as Nitrogen, mg/L" => "nitrates_mg_l",
-        "Phosphates as Phosphorous, mg/L" => "phosphates_mg_l",
-        "Chlorides Cl - (mg/L)" => "chlorides_mg_l")
+    mapping = RENAME_MAP
     n_renamed = 0
     for (old, new) in mapping
         if old in names(df) && old != new
@@ -943,18 +962,13 @@ function stage12_save(df::DataFrame, miss_before::DataFrame,
             "Date/Time/Float64 parsing of all typed columns",
             "Flagged in outlier_params, KEPT (extremes can be real events)"],
         after = [after.missing_cells, 0, 0, 0, after.outliers])
-    CSV.write(joinpath(RESULTS_DIR, "before_after.csv"), ba)
     println("\nBefore / after summary:")
     pretty_table(ba, alignment = [:l, :r, :l, :r])
 
     # --- logs ----------------------------------------------------------------
     CSV.write(joinpath(RESULTS_DIR, "step_log.csv"), DataFrame(STEPS))
-    CSV.    write(joinpath(RESULTS_DIR, "decision_log.csv"), DataFrame(DECISIONS))
-    println("Saved: results/step_log.csv, results/decision_log.csv, ",
-            "results/before_after.csv")
-
-    # figures stub (replaced later with fig01..fig16)
-    mkpath(FIG_DIR)
+    CSV.write(joinpath(RESULTS_DIR, "decision_log.csv"), DataFrame(DECISIONS))
+    println("Saved: results/step_log.csv, results/decision_log.csv")
 end
 
 # --- figures ----------------------------------------------------------------
@@ -973,6 +987,14 @@ function write_quality_summary()
 end
 
 # =============================================================================
+# Report evidence artifacts + figures (design.md §12 step 4). The tokens are
+# included first because report_figures.jl evaluates PALETTE at load time.
+# =============================================================================
+include(joinpath(@__DIR__, "ui", "tokens.jl"))
+include(joinpath(@__DIR__, "report_figures.jl"))
+include(joinpath(@__DIR__, "report_artifacts.jl"))
+
+# =============================================================================
 # MAIN — run every stage top to bottom (no hidden state, relative paths only)
 # =============================================================================
 function main()
@@ -988,10 +1010,14 @@ function main()
            "PrettyTables " * string(pkgversion(PrettyTables)),
            "Bonito " * string(pkgversion(Bonito)),
            "JSON3 " * string(pkgversion(JSON3)),
-           "WGLMakie " * string(pkgversion(WGLMakie))]
+           "WGLMakie " * string(pkgversion(WGLMakie)),
+           "Colors " * string(pkgversion(Colors))]
     foreach(println, env)
     write(joinpath(RESULTS_DIR, "environment.txt"), join(env, "\n") * "\n")
     write_quality_summary()
+
+    run_ts = Dates.now()
+    run_id = "run_" * Dates.format(run_ts, "yyyymmdd_HHMMSS")
 
     # --- inspection + extraction --------------------------------------------
     hdr = stage1_load_and_inspect()
@@ -1014,6 +1040,12 @@ function main()
             ext.n_skipped_content, " | stray cells excluded: ",
             ext.n_stray_cells)
 
+    # raw state before any cleaning — snapshot for the report evidence layer
+    raw = deepcopy(df)
+    snap = raw_snapshot(raw)
+    println("Raw snapshot taken: ", nrow(raw), " rows x ", ncol(raw),
+            " columns (T1..T11 inputs)")
+
     # --- assessment (before) -------------------------------------------------
     total_miss, total_ph, miss_before = stage2_missing_assessment(df)
     n_exact, n_key = stage3_duplicate_assessment(df)
@@ -1026,8 +1058,8 @@ function main()
                  "ph" => Float64[float(v) for v in df.PH if v isa Real])
 
     # --- cleaning ------------------------------------------------------------
-    n_empty, n_dupe, n_conflict = stage5_remove!(df)
-    n_extracted = nrow(df) + n_empty + n_dupe
+    r5 = stage5_remove!(df)
+    n_extracted = nrow(df) + r5.n_empty + r5.n_dupe
     types6 = stage6_correct_types!(df)
     n_filled, n_label = stage7_handle_missing!(df)
     n_out, outlier_tbl = stage8_flag_outliers!(df)
@@ -1035,7 +1067,8 @@ function main()
     n_ren = stage10_transform!(df)
 
     # --- validation + save ---------------------------------------------------
-    after = stage11_validate(df, n_extracted, n_empty, n_dupe, n_conflict)
+    after = stage11_validate(df, n_extracted, r5.n_empty, r5.n_dupe,
+                             r5.n_conflict)
 
     before = (;
         missing_cells = total_miss + total_ph,
@@ -1045,15 +1078,27 @@ function main()
         outliers = n_out,
         flow = [ext.n_records + ext.n_period_labels +
                 ext.n_skipped_content + ext.n_skipped_blank,
-                n_extracted, n_extracted - n_empty, nrow(df)],
+                n_extracted, n_extracted - r5.n_empty, nrow(df)],
         dists = dists)
     stage12_save(df, miss_before, before,
                  (; missing_cells = after.n_missing, outliers = n_out))
 
+    # --- report evidence layer (design.md §12 step 4) ------------------------
+    ctx = (run_id = run_id, run_ts = run_ts, raw = raw, df = df, ext = ext,
+           miss_before = miss_before, inv = inv, n_exact = n_exact,
+           n_key = n_key, r5 = r5, types6 = types6,
+           n_filled = n_filled, n_label = n_label, n_out = n_out,
+           outlier_tbl = outlier_tbl, n_std = n_std, n_ren = n_ren,
+           after = after, snap = snap)
+    make_report_figures(ctx)
+    write_report_artifacts(ctx)
+    println("\nRun id: ", run_id, "  — report evidence under results/runs/",
+            run_id, "/")
+
     banner("PIPELINE COMPLETE")
     println("Final dataset: ", nrow(df), " rows x ", ncol(df), " columns")
-    println("Removed in total: ", n_empty, " empty + ", n_dupe,
-            " duplicate records; kept ", n_conflict,
+    println("Removed in total: ", r5.n_empty, " empty + ", r5.n_dupe,
+            " duplicate records; kept ", r5.n_conflict,
             " unverifiable period conflicts")
 end
 
