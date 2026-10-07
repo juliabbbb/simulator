@@ -1,0 +1,6 @@
+data_quality_issue,before,action_taken,after
+Missing Values,0,-,0
+Duplicate Records,0,-,0
+Invalid Entries,0,-,0
+Incorrect Data Types,0,-,0
+Outliers,0,-,0
