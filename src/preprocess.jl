@@ -26,7 +26,11 @@ using StatsBase       # quantiles/IQR for Tukey outlier fences
 using Missings         # missing-value utilities (allowmissing, etc.)
 using Dates            # Date/Time parsing, year/month extraction
 using CairoMakie       # report figures
+using PrettyTables     # readable console summaries
 using SHA
+using Bonito           # UI (for design stack, loaded but not yet wired)
+using JSON3            # run_manifest.json
+using WGLMakie         # optional interactive figures (loaded)
 function file_sha256(p::AbstractString)
     isfile(p) || return ""
     io = open(p, "r")
@@ -945,12 +949,12 @@ function stage12_save(df::DataFrame, miss_before::DataFrame,
 
     # --- logs ----------------------------------------------------------------
     CSV.write(joinpath(RESULTS_DIR, "step_log.csv"), DataFrame(STEPS))
-    CSV.write(joinpath(RESULTS_DIR, "decision_log.csv"), DataFrame(DECISIONS))
+    CSV.    write(joinpath(RESULTS_DIR, "decision_log.csv"), DataFrame(DECISIONS))
     println("Saved: results/step_log.csv, results/decision_log.csv, ",
             "results/before_after.csv")
 
-    make_figures(df, miss_before, before)
-    println("Saved figures to figures/")
+    # figures stub (replaced later with fig01..fig16)
+    mkpath(FIG_DIR)
 end
 
 # --- figures ----------------------------------------------------------------
