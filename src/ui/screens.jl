@@ -31,20 +31,27 @@ end
 run_dirs() = isdir(RUNS_DIR) ?
     sort(filter(f -> isdir(joinpath(RUNS_DIR, f)), readdir(RUNS_DIR))) : String[]
 
-"Files that, if newer than the last run snapshot, make the evidence STALE."
-stale_sources() = begin
-    files = String[]
-    for g in ["src/*.jl", "src/ui/*.jl", "design.md", "data/raw/*.xlsx", "Project.toml"]
-        append!(files, glob(g, ROOT))
+"Newest mtime over the pipeline's live inputs (source, design, raw data)."
+function newest_source_mtime()
+    ts = 0.0
+    for dir in [joinpath(ROOT, "src"), joinpath(ROOT, "src", "ui"),
+                joinpath(ROOT, "data", "raw")]
+        isdir(dir) || continue
+        for f in readdir(dir)
+            p = joinpath(dir, f)
+            isfile(p) && (ts = max(ts, mtime(p)))
+        end
     end
-    files
+    for extra in [joinpath(ROOT, "design.md"), joinpath(ROOT, "Project.toml")]
+        isfile(extra) && (ts = max(ts, mtime(extra)))
+    end
+    ts
 end
 
 function staleness()
     lr = latest_run()
     lr === nothing && return :none
-    lr_time = mtime(joinpath(RUNS_DIR, lr))
-    any(f -> isfile(f) && mtime(f) > lr_time, stale_sources()) ? :stale : :current
+    newest_source_mtime() > mtime(joinpath(RUNS_DIR, lr)) ? :stale : :current
 end
 
 "Reconciliation numbers: input, total removed, output, balanced?"
@@ -221,8 +228,9 @@ const T5_JUMPS = ["Missing Values" => "missing_by_column.csv",
 function t5_block(ctx)
     df = ctx.tables["quality_summary.csv"]
     cap = "Table 5. REQUIRED before/after summary — paper §3.4/4.1"
-    jumps = [begin
-        b = Button(string("→ ", issue); style = Styles(
+    jumps = Any[]
+    for (issue, target) in T5_JUMPS
+        b = Button(string("\u2192 ", issue); style = Styles(
             "font-family" => FONT_MONO, "font-size" => "12px",
             "background-color" => CREAM,
             "border" => string(BORDER_THIN, "px solid ", INK),
@@ -230,8 +238,8 @@ function t5_block(ctx)
         on(b.value) do _
             ctx.screen[] = :report; ctx.tab[] = :tables; ctx.sel_table[] = target
         end
-        b
-    end for (issue, target) in T5_JUMPS]
+        push!(jumps, b)
+    end
     return DOM.div(
         DOM.div(chip("T5 REQUIRED", MINT),
                 DOM.span("  before/after table, untouched";
@@ -380,17 +388,18 @@ end
 
 function screen_validation(ctx)
     v = ctx.tables["validation.csv"]
-    checks = [begin
+    checks = Any[]
+    for r in eachrow(v)
         pass = string(r.status) == "PASS"
-        panel(
+        push!(checks, panel(
             chip(pass ? "PASS" : "FAIL", pass ? MINT : VERMILION),
             DOM.span(string("  ", r.check); style = Styles("font-weight" => "bold")),
             DOM.div(string("expected: ", r.expected);
                     style = Styles("font-size" => "12px", "opacity" => "0.78")),
             DOM.div(string("actual:   ", r.actual);
                     style = Styles("font-size" => "12px", "opacity" => "0.78"));
-            color = PAPER, pad = "12px")
-    end for r in eachrow(v)]
+            color = PAPER, pad = "12px"))
+    end
     return DOM.div(
         reconcile_banner(ctx),
         css_grid("1fr 1fr", 12, checks...),
@@ -562,14 +571,15 @@ function diff_dom(ra, rb)
         body = Any[]
         for k in 1:nshow
             i = changed[k][1]
-            push!(body, DOM.tr(DOM.td(string(i)), Any[
-                begin
-                    same = isequal(a[i, c], b[i, c])
-                    same ? DOM.td(fmt(a[i, c])) :
-                    DOM.td(fmt(b[i, c]); style = Styles(
-                        "background-color" => BLUSH,
-                        "title" => string("was: ", fmt(a[i, c]))))
-                end for c in names(a)]...))
+            cells = map(names(a)) do c
+                if isequal(a[i, c], b[i, c])
+                    return DOM.td(fmt(a[i, c]))
+                end
+                return DOM.td(fmt(b[i, c]); style = Styles(
+                    "background-color" => BLUSH,
+                    "title" => string("was: ", fmt(a[i, c]))))
+            end
+            push!(body, DOM.tr(DOM.td(string(i)), cells...))
         end
         push!(out, panel(
             DOM.div(chip(string(fn, ": ", length(changed), " changed cells"),
@@ -594,7 +604,7 @@ function screen_report(ctx)
         style = Styles("border" => string(BORDER_THICK, "px solid ", INK),
                        "background-color" => CREAM, "padding" => "4px",
                        "margin-bottom" => "10px"))
-    body = map((ctx.tab, ctx.sel_table, ctx.sel_fig)) do (t, st, sf)
+    body = map(ctx.tab, ctx.sel_table, ctx.sel_fig) do t, st, sf
         t == :figures ? pane_split(ctx, :figures, sf) :
         t == :reconciliation ? report_main_reconciliation(ctx) :
         t == :export ? report_main_export(ctx) :
@@ -659,7 +669,7 @@ end
 
 "Page skeleton: header strip, reconciliation banner, active screen."
 function root_view(ctx)
-    return map((ctx.screen, ctx.mode)) do (s, mode)
+    return map(ctx.screen, ctx.mode) do s, mode
         page = s == :dataset ? screen_dataset(ctx) :
                s == :quality ? screen_quality(ctx) :
                s == :cleaning ? screen_cleaning(ctx) :
