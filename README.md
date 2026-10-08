@@ -83,6 +83,24 @@ results/         logs, summaries, detail tables
 figures/         report charts
 ```
 
+## Report app
+
+`src/ui/` is a Bonito 5 app that re-reads the evidence layer
+(`results/`, `figures/`, `results/runs/`) into seven screens — DATASET,
+QUALITY, CLEANING, BEFORE/AFTER, VALIDATION, FINAL, REPORT — with a
+run-history diff drawer and a freshness badge (`CURRENT`/`STALE`/`NO RUN`).
+
+- Live server: `julia --project=. -e 'include("src/ui/BrutalUI.jl"); BrutalUI.run_server()'` → http://127.0.0.1:8080
+- Offline single-file export (self-contained; figures embedded as data URIs):
+
+```julia
+julia --project=. -e 'include("src/ui/BrutalUI.jl"); BrutalUI.export_report()'
+```
+
+- Staleness: any edit to `src/`, `design.md`, `Project.toml` or `data/raw/*`
+  newer than the newest `results/runs/` snapshot flips the badge to `STALE`;
+  rerun the pipeline to flip it back to `CURRENT`.
+
 ## Reproduce the environment
 
 From a fresh machine:

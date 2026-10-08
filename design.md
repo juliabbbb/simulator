@@ -276,7 +276,23 @@ Run at the end of the pipeline via `write_report_artifacts(run)`:
 ## 12. Delivery order (as scoped)
 
 1. **design.md** ✅ — this document (styling + architecture only).
-2. **Packages:** add Bonito, JSON3, WGLMakie to the project.
-3. **Artifacts:** `write_report_artifacts(run)` in `src/preprocess.jl` → T1–T20 CSVs, `run_manifest.json`, `quality_summary.csv` (T5), reconciliation, scorecard.
-4. **Figures:** replace the 4 legacy figures with `fig01..fig16` under `brutal_theme()`.
-5. **UI:** `src/ui/` Bonito app — 7 screens, REPORT page, live server + `export_static`.
+2. **Packages:** add Bonito, JSON3, WGLMakie to the project. ✅
+3. **Artifacts:** `write_report_artifacts(run)` in `src/preprocess.jl` → T1–T20 CSVs, `run_manifest.json`, `quality_summary.csv` (T5), reconciliation, scorecard. ✅
+4. **Figures:** replace the 4 legacy figures with `fig01..fig16` under `brutal_theme()`. ✅
+5. **UI:** `src/ui/` Bonito app — 7 screens, REPORT page, live server + `export_static`. ✅
+
+### Delivered (step 5) — how to run
+
+- Live server: `julia --project=. -e 'include("src/ui/BrutalUI.jl"); BrutalUI.run_server()'` → http://127.0.0.1:8080
+- Static export: `julia --project=. -e 'include("src/ui/BrutalUI.jl"); BrutalUI.export_report()'` → `report/index.html` (single self-contained file; figures + evidence embedded as data URIs)
+- Files: `src/ui/BrutalUI.jl` (module), `tokens.jl` (palette), `styles.jl` (global CSS),
+  `theme_makie.jl` (brutal_theme/save_fig, shared with the pipeline), `components.jl`
+  (panel/chip/metric/report-table/figure-card), `screens.jl` (7 screens + data layer +
+  run-history diff), `app.jl` (build_app/run_server/export_report).
+- Verified: all 16 figures build, 7 screens render without errors in static export,
+  live server serves HTTP 200, freshness badge flips STALE→CURRENT per evidence run.
+- Design deltas (bounded scope, recorded): RECONCILIATION is a banner on every screen
+  (design §6 shows it on the REPORT page); MODE toggles page chrome only (panels keep
+  their fills per §1); T5 cross-links are chips underneath the untouched table (no JS
+  authored, so no in-cell links); run history diffs cells with a blush fill + "was X"
+  tooltip instead of a side-by-side split.
